@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CMS GitHub - ADScms</title>
+    <meta charset="UTF-8">
+    <style>
+        :root {
+            --primary: #2ea44f;
+            --background: #f6f8fa;
+            --card-bg: #ffffff;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--background);
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+            line-height: 1.5;
+        }
+        .editor-panel, .article-card {
+            background: var(--card-bg);
+            border: 1px solid #d0d7de;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+        }
+        button {
+            background: var(--primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #22863a;
+        }
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 8px;
+            border: 1px solid #d0d7de;
+            border-radius: 6px;
+            font-family: inherit;
+        }
+        textarea {
+            min-height: 100px;
+        }
+        #status {
+            margin: 10px 0;
+            font-size: 0.9em;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .error {
+            background-color: #ffebe9;
+            color: #cf222e;
+        }
+        .success {
+            background-color: #dafbe1;
+            color: #1a7f37;
+        }
+        .tag {
+            display: inline-block;
+            background: #ddf4ff;
+            color: #0969da;
+            padding: 4px 8px;
+            margin-right: 8px;
+            border-radius: 12px;
+            font-size: 0.85em;
+        }
+        .article-date {
+            color: #57606a;
+            font-size: 0.85em;
+            margin-top: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="editor-panel">
+        <h2>Nouvel article</h2>
+        <input type="text" id="title" placeholder="Titre" required>
+        <textarea id="content" placeholder="Contenu de l'article" required></textarea>
+        <input type="text" id="tags" placeholder="Tags (séparés par des virgules)">
+        <button onclick="saveArticle()">Publier sur GitHub</button>
+        <div id="status">Prêt à synchroniser avec GitHub...</div>
+    </div>
+
+    <div id="articles"></div>
+
+    <script>
+        // Configuration GitHub pour votre repository
+        const GITHUB_CONFIG = {
+            repoOwner: '4ronan',
+            repoName: 'ADScms',
+            branch: 'main',
+            articlesDir: 'articles/',
+            token: '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'
+        };
+
+        // Fonction pour mettre à jour le statut
+        function updateStatus(message, type = 'info') {
+            const statusElement = document.getElementById('status');
+            statusElement.textContent = message;
+            statusElement.className = type;
+        }
+
+        // Sauvegarder un nouvel article
+        async function saveArticle() {
+            const title = document.getElementById('title').value.trim();
+            const content = document.getElementById('content').value.trim();
+            
+            if (!title || !content) {
+                updateStatus('Le titre et le contenu sont obligatoires', 'error');
+                return;
+            }
+
+            const newArticle = {
+                title: title,
+                content: content,
+                tags: document.getElementById('tags').value.split(',').map(t => t.trim()).filter(t => t),
+                date: new Date().toISOString()
+            };
+
+            const filename = `${newArticle.date.replace(/[:.]/g, '-')}-${title.toLowerCase().replace(/[^a-z0-9]/g, '-')}.json`;
+            const fileContent = JSON.stringify(newArticle, null, 2);
+            
+            updateStatus('Envoi en cours vers GitHub...');
+
+            try {
+                const response = await fetch(
+                    `https://api.github.com/repos/${GITHUB_CONFIG.repoOwner}/${GITHUB_CONFIG.repoName}/contents/${GITHUB_CONFIG.articlesDir}${filename}`,
+                    {
+                        method: 'PUT',
+                        headers: {
+                            'Authorization': `Bearer ${GITHUB_CONFIG.token}`,
+                            'Accept': 'application/vnd.github+json',
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            message: `Nouvel article: ${title}`,
+                            content: btoa(unescape(encodeURIComponent(fileContent))),
+                            branch: GITHUB_CONFIG.branch
+                        })
+                    }
+                );
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    updateStatus('Article publié avec succès !', 'success');
+                    document.getElementById('title').value = '';
+                    document.getElementById('content').value = '';
+                    document.getElementById('tags').value = '';
+                    loadArticles();
+                } else {
+                    updateStatus(`Erreur GitHub: ${result.message}`, 'error');
+                    console.error('GitHub API Error:', result);
+                }
+            } catch (error) {
+                updateStatus(`Erreur réseau: ${error.message}`, 'error');
+                console.error('Network Error:', error);
+            }
+        }
+
+        // Charger les articles depuis GitHub
+        async function loadArticles() {
+            updateStatus('Chargement des articles...');
+
+            try {
+                const response = await fetch(
+                    `https://api.github.com/repos/${GITHUB_CONFIG.repoOwner}/${GITHUB_CONFIG.repoName}/contents/${GITHUB_CONFIG.articlesDir}?ref=${GITHUB_CONFIG.branch}`,
+                    {
+                        headers: {
+                            'Authorization': `Bearer ${GITHUB_CONFIG.token}`,
+                            'Accept': 'application/vnd.github+json'
+                        }
+                    }
+                );
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const files = await response.json();
+                const articlesContainer = document.getElementById('articles');
+                articlesContainer.innerHTML = '';
+
+                if (!Array.isArray(files)) {
+                    updateStatus('Aucun article trouvé', 'info');
+                    return;
+                }
+
+                // Trier par date (du plus récent au plus ancien)
+                const sortedFiles = files
+                    .filter(file => file.name.endsWith('.json'))
+                    .sort((a, b) => b.name.localeCompare(a.name));
+
+                for (const file of sortedFiles) {
+                    try {
+                        const fileResponse = await fetch(file.download_url);
+                        if (!fileResponse.ok) continue;
+                        
+                        const article = await fileResponse.json();
+                        articlesContainer.innerHTML += `
+                            <div class="article-card">
+                                <h3>${article.title}</h3>
+                                <p>${article.content.replace(/\n/g, '<br>')}</p>
+                                ${article.tags && article.tags.length ? `
+                                    <div>${article.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}</div>
+                                ` : ''}
+                                <div class="article-date">
+                                    Publié le ${new Date(article.date).toLocaleDateString('fr-FR', { 
+                                        year: 'numeric', 
+                                        month: 'long', 
+                                        day: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                    })}
+                                </div>
+                            </div>
+                        `;
+                    } catch (error) {
+                        console.error(`Error loading ${file.name}:`, error);
+                    }
+                }
+
+                updateStatus(`${sortedFiles.length} articles chargés`, 'success');
+            } catch (error) {
+                updateStatus(`Erreur de chargement: ${error.message}`, 'error');
+                console.error('Loading Error:', error);
+            }
+        }
+
+        // Chargement initial
+        document.addEventListener('DOMContentLoaded', () => {
+            loadArticles();
+            // Rafraîchissement automatique toutes les 2 minutes
+            setInterval(loadArticles, 120000);
+        });
+    </script>
+</body>
+</html>
